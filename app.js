@@ -47,9 +47,9 @@ loadPosts();
 // Admin login uses Supabase Auth. Deletion is also enforced by database RLS policies.
 const ADMIN_EMAIL='lion.michaelsen@gmx.de';let isSiteAdmin=false;
 const adminModal=document.getElementById('adminModal'),adminStatus=document.getElementById('adminStatus');
-document.getElementById('adminLoginOpen').onclick=()=>{adminModal.classList.add('open');adminStatus.textContent='';db.auth.getSession().then(async({data})=>{if(data.session?.user?.email===ADMIN_EMAIL){isSiteAdmin=true;adminStatus.textContent='Du bist bereits als Admin angemeldet.';document.getElementById('adminSubmit').textContent='Abmelden';await loadPosts();addAdminDeleteButtons()}})};
+document.getElementById('adminLoginOpen').onclick=()=>{adminModal.classList.add('open');adminStatus.textContent='';db.auth.getSession().then(async({data})=>{if(data.session?.user?.email===ADMIN_EMAIL){isSiteAdmin=true;adminStatus.textContent='Du bist bereits als Admin angemeldet.';document.getElementById('adminSubmit').textContent='Abmelden';await loadPosts();addAdminDeleteButtons();renderPolls()}})};
 document.getElementById('adminClose').onclick=()=>adminModal.classList.remove('open');
-document.getElementById('adminSubmit').onclick=async()=>{const button=document.getElementById('adminSubmit');button.disabled=true;try{const {data:{session}}=await db.auth.getSession();if(session?.user?.email===ADMIN_EMAIL){const {error}=await db.auth.signOut();if(error)throw error;isSiteAdmin=false;adminStatus.textContent='Du wurdest abgemeldet.';button.textContent='Anmelden';document.querySelectorAll('.admin-delete').forEach(x=>x.remove());await loadPosts();return}const password=document.getElementById('adminPassword').value;if(!password){adminStatus.textContent='Bitte gib dein Passwort ein.';return}const {data,error}=await db.auth.signInWithPassword({email:ADMIN_EMAIL,password});if(error)throw error;if(data.user?.email!==ADMIN_EMAIL){await db.auth.signOut();throw new Error('Dieses Konto ist nicht als Admin zugelassen.')}isSiteAdmin=true;adminStatus.textContent='Erfolgreich angemeldet. Admin-Funktionen sind aktiv.';button.textContent='Abmelden';await loadPosts();addAdminDeleteButtons();setTimeout(()=>adminModal.classList.remove('open'),900)}catch(error){adminStatus.textContent='Anmeldung fehlgeschlagen: '+(error.message||String(error))}finally{button.disabled=false}};
+document.getElementById('adminSubmit').onclick=async()=>{const button=document.getElementById('adminSubmit');button.disabled=true;try{const {data:{session}}=await db.auth.getSession();if(session?.user?.email===ADMIN_EMAIL){const {error}=await db.auth.signOut();if(error)throw error;isSiteAdmin=false;adminStatus.textContent='Du wurdest abgemeldet.';button.textContent='Anmelden';document.querySelectorAll('.admin-delete').forEach(x=>x.remove());await loadPosts();renderPolls();return}const password=document.getElementById('adminPassword').value;if(!password){adminStatus.textContent='Bitte gib dein Passwort ein.';return}const {data,error}=await db.auth.signInWithPassword({email:ADMIN_EMAIL,password});if(error)throw error;if(data.user?.email!==ADMIN_EMAIL){await db.auth.signOut();throw new Error('Dieses Konto ist nicht als Admin zugelassen.')}isSiteAdmin=true;adminStatus.textContent='Erfolgreich angemeldet. Admin-Funktionen sind aktiv.';button.textContent='Abmelden';await loadPosts();addAdminDeleteButtons();renderPolls();setTimeout(()=>adminModal.classList.remove('open'),900)}catch(error){adminStatus.textContent='Anmeldung fehlgeschlagen: '+(error.message||String(error))}finally{button.disabled=false}};
 function addAdminDeleteButtons(){if(!isSiteAdmin)return;document.querySelectorAll('#feed article.post').forEach(post=>{const postId=post.querySelector('[data-comments]')?.dataset.comments;if(postId&&!post.querySelector('[data-admin-delete-post]')){const b=document.createElement('button');b.className='admin-delete';b.textContent='Beitrag löschen';b.dataset.adminDeletePost=postId;post.querySelector('.post-actions')?.append(b);const edit=document.createElement('button');edit.className='admin-edit';edit.textContent='✎ Beitrag bearbeiten';edit.dataset.adminEditPost=postId;post.querySelector('.post-actions')?.append(edit)}post.querySelectorAll('.comment').forEach((comment,index)=>{const comments=posts.find(p=>String(p.id)===String(postId))?.comments||[];const c=comments[index];if(c?.id&&!comment.querySelector('[data-admin-delete-comment]')){const b=document.createElement('button');b.className='admin-delete';b.textContent='Kommentar löschen';b.dataset.adminDeleteComment=c.id;comment.append(b)}})});addAdminPinButtons()}
 
 document.getElementById('feed').addEventListener('click',async event=>{const b=event.target.closest('[data-admin-edit-post]');if(!b)return;event.preventDefault();event.stopPropagation();if(!isSiteAdmin){alert('Bitte zuerst als Admin anmelden.');return}const {data:{user},error:authError}=await db.auth.getUser();if(authError||!user||user.email!==ADMIN_EMAIL||user.id!=='128e1727-2a01-43ae-80db-051d49f2fc56'){isSiteAdmin=false;alert('Bitte melde dich erneut als Admin an.');return}const p=posts.find(x=>String(x.id)===String(b.dataset.adminEditPost));if(!p)return;const title=prompt('Beitragstitel bearbeiten:',p.title||'');if(title===null)return;const body=prompt('Beitragstext bearbeiten:',p.body||'');if(body===null)return;if(!title.trim()||!body.trim()){alert('Titel und Text dürfen nicht leer sein.');return}b.disabled=true;b.textContent='Speichert …';const {data,error}=await db.from('posts').update({title:title.trim(),body:body.trim()}).eq('id',p.id).select('id');if(error||!data?.length){b.disabled=false;b.textContent='✎ Beitrag bearbeiten';alert('Bearbeiten fehlgeschlagen: '+(error?.message||'Supabase hat die Änderung blockiert. Bitte das SQL ausführen.'));return}await loadPosts();alert('Beitrag wurde aktualisiert.')});
@@ -59,7 +59,7 @@ document.getElementById('feed').addEventListener('click',async event=>{const pos
 function addAdminPinButtons(){if(!isSiteAdmin)return;document.querySelectorAll('#feed article.post').forEach(card=>{const id=card.querySelector('[data-comments]')?.dataset.comments,p=posts.find(x=>String(x.id)===String(id));if(!id||!p||card.querySelector('[data-admin-pin]'))return;card.classList.toggle('is-pinned',!!p.is_pinned);if(p.is_pinned&&!card.querySelector('.pinned-label')){const label=document.createElement('div');label.className='pinned-label';label.textContent='📌 Angeheftet';card.querySelector('h3')?.before(label)}const button=document.createElement('button');button.className='admin-pin';button.dataset.adminPin=id;button.textContent=p.is_pinned?'📌 Anheften lösen':'📌 Anheften';card.querySelector('.post-actions')?.prepend(button)})}
 document.getElementById('feed').addEventListener('click',async event=>{const button=event.target.closest('[data-admin-pin]');if(!button)return;event.preventDefault();event.stopPropagation();if(!isSiteAdmin){alert('Bitte zuerst als Admin anmelden.');return}const {data:{user},error:authError}=await db.auth.getUser();if(authError||!user||user.email!==ADMIN_EMAIL||user.id!=='128e1727-2a01-43ae-80db-051d49f2fc56'){isSiteAdmin=false;alert('Bitte melde dich erneut als Admin an.');return}const id=button.dataset.adminPin,p=posts.find(x=>String(x.id)===String(id));if(!p)return;button.disabled=true;const {data,error}=await db.from('posts').update({is_pinned:!p.is_pinned}).eq('id',id).select('id');if(error){button.disabled=false;alert('Anheften fehlgeschlagen: '+error.message);return}if(!data?.length){button.disabled=false;alert('Die Änderung wurde durch eine Supabase-Sicherheitsregel blockiert.');return}await loadPosts();addAdminDeleteButtons();addAdminPinButtons()});
 const loadPostsBeforePinning=loadPosts;loadPosts=async()=>{await loadPostsBeforePinning();const ids=posts.map(p=>p.id);if(ids.length){const {data,error}=await db.from('posts').select('id,is_pinned').in('id',ids);if(error)console.error('Anheft-Status konnte nicht geladen werden:',error);else posts.forEach(p=>p.is_pinned=!!data.find(row=>row.id===p.id)?.is_pinned)}posts.sort((a,b)=>Number(!!b.is_pinned)-Number(!!a.is_pinned));render();if(isSiteAdmin){addAdminDeleteButtons();addAdminPinButtons()}};
-db.auth.getSession().then(async({data})=>{if(data.session?.user?.email===ADMIN_EMAIL){isSiteAdmin=true;await loadPosts();addAdminDeleteButtons();addAdminPinButtons()}});
+db.auth.getSession().then(async({data})=>{if(data.session?.user?.email===ADMIN_EMAIL){isSiteAdmin=true;await loadPosts();addAdminDeleteButtons();addAdminPinButtons();renderPolls()}});
 
 
 ;
@@ -72,7 +72,7 @@ if(!pollVoterId){pollVoterId=crypto.randomUUID();localStorage.setItem(pollVoterK
 let communityPolls=[];
 function renderPolls(){
  if(!communityPolls.length){pollList.innerHTML='<div class="poll-empty">Noch keine Umfragen. Starte die erste Frage aus der Community!</div>';return}
- pollList.innerHTML=communityPolls.map(p=>{const total=p.votes.length,own=p.votes.find(v=>v.voter_id===pollVoterId),counts=p.options.map((_,i)=>p.votes.filter(v=>Number(v.option_index)===i).length);return `<article class="poll-card" data-poll-card="${p.id}"><h4>${esc(p.question)}</h4>${p.options.map((option,i)=>{const pct=total?Math.round(counts[i]/total*100):0;const selected=own&&Number(own.option_index)===i;return `<button class="poll-option ${selected?'selected':''}" data-poll-vote="${p.id}" data-option="${i}" aria-pressed="${!!selected}"><span class="poll-bar" style="width:${own?pct:0}%"></span><span class="poll-option-text">${esc(option)}</span>${own?`<span class="poll-percent">${pct}% · ${counts[i]}</span>`:''}${selected?'<span class="poll-percent">✓ Deine Wahl</span>':''}</button>`}).join('')}<div class="poll-meta"><span>${total} ${total===1?'Stimme':'Stimmen'}</span><span>${own?'<span class="poll-change">Du kannst deine Stimme ändern</span>':'Eine Stimme pro Browser'}</span></div>${isSiteAdmin?`<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="poll-delete" data-poll-delete="${p.id}">🗑 Umfrage löschen</button></div>`:''}</article>`}).join('');
+ pollList.innerHTML=communityPolls.map(p=>{const total=p.votes.length,own=p.votes.find(v=>v.voter_id===pollVoterId),counts=p.options.map((_,i)=>p.votes.filter(v=>Number(v.option_index)===i).length);return `<article class="poll-card" data-poll-card="${p.id}"><h4>${esc(p.question)}</h4>${p.options.map((option,i)=>{const pct=total?Math.round(counts[i]/total*100):0;const selected=own&&Number(own.option_index)===i;return `<button class="poll-option ${selected?'selected':''}" data-poll-vote="${p.id}" data-option="${i}" aria-pressed="${!!selected}"><span class="poll-bar" style="width:${own?pct:0}%"></span><span class="poll-option-text">${esc(option)}</span>${own?`<span class="poll-percent">${pct}% · ${counts[i]}</span>`:''}${selected?'<span class="poll-percent">✓ Deine Wahl</span>':''}</button>`}).join('')}<div class="poll-meta"><span>${total} ${total===1?'Stimme':'Stimmen'}</span><span>${own?'<span class="poll-change">Du kannst deine Stimme ändern</span>':'Eine Stimme pro Browser'}</span></div>${isSiteAdmin?`<div class="poll-admin-actions"><button class="poll-edit" data-poll-edit="${p.id}">✎ Umfrage bearbeiten</button><button class="poll-delete" data-poll-delete="${p.id}">🗑 Umfrage löschen</button></div>`:''}</article>`}).join('');
 }
 async function loadCommunityPolls(){
  const {data,error}=await db.from('community_polls').select('id,question,options,created_at').order('created_at',{ascending:false}).limit(20);
@@ -85,6 +85,27 @@ document.getElementById('openPollCreate').onclick=()=>{document.getElementById('
 document.getElementById('closePollCreate').onclick=()=>document.getElementById('pollCreateModal').classList.remove('open');
 document.getElementById('publishPoll').onclick=async()=>{const question=document.getElementById('pollQuestion').value.trim();const options=[...document.querySelectorAll('#pollCreateModal .poll-answer')].map(x=>x.value.trim()).filter(Boolean);const status=document.getElementById('pollCreateStatus'),button=document.getElementById('publishPoll');if(question.length<5){status.textContent='Bitte gib eine Frage mit mindestens 5 Zeichen ein.';return}if(options.length<2){status.textContent='Bitte gib mindestens zwei Antwortmöglichkeiten ein.';return}if(new Set(options.map(x=>x.toLocaleLowerCase('de'))).size!==options.length){status.textContent='Jede Antwortmöglichkeit muss unterschiedlich sein.';return}button.disabled=true;button.textContent='Wird veröffentlicht …';status.textContent='';const {error}=await db.from('community_polls').insert({question,options});button.disabled=false;button.textContent='Umfrage veröffentlichen';if(error){console.error('Umfrage konnte nicht erstellt werden:',error);status.textContent='Fehler: '+error.message;return}document.getElementById('pollQuestion').value='';document.querySelectorAll('#pollCreateModal .poll-answer').forEach(x=>x.value='');document.getElementById('pollCreateModal').classList.remove('open');await loadCommunityPolls()};
 pollList.addEventListener('click',async event=>{
+ const editButton=event.target.closest('[data-poll-edit]');
+ if(editButton){
+  event.preventDefault();
+  if(!isSiteAdmin){alert('Bitte zuerst als Admin anmelden.');return}
+  const {data:{user},error:authError}=await db.auth.getUser();
+  if(authError||!user||user.email!==ADMIN_EMAIL||user.id!=='128e1727-2a01-43ae-80db-051d49f2fc56'){isSiteAdmin=false;alert('Bitte melde dich erneut als Admin an.');renderPolls();return}
+  const poll=communityPolls.find(p=>p.id===editButton.dataset.pollEdit);if(!poll)return;
+  const question=prompt('Umfragefrage bearbeiten:',poll.question);if(question===null)return;
+  if(question.trim().length<5){alert('Die Frage muss mindestens 5 Zeichen lang sein.');return}
+  let options=poll.options;
+  if(poll.votes.length===0){
+   const raw=prompt('Antwortmöglichkeiten bearbeiten (eine pro Zeile, 2 bis 5 Antworten):',poll.options.join('\n'));
+   if(raw===null)return;
+   options=raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+   if(options.length<2||options.length>5||options.some(x=>x.length>80)||new Set(options.map(x=>x.toLocaleLowerCase('de'))).size!==options.length){alert('Bitte gib 2 bis 5 unterschiedliche Antworten mit höchstens 80 Zeichen ein.');return}
+  }else if(!confirm('Diese Umfrage hat bereits Stimmen. Die Antwortmöglichkeiten bleiben deshalb unverändert; nur die Frage wird geändert. Fortfahren?'))return;
+  editButton.disabled=true;editButton.textContent='Speichert …';
+  const {data,error}=await db.from('community_polls').update({question:question.trim(),options}).eq('id',poll.id).select('id');
+  if(error||!data?.length){editButton.disabled=false;editButton.textContent='✎ Umfrage bearbeiten';alert('Bearbeiten fehlgeschlagen: '+(error?.message||'Supabase hat die Änderung blockiert. Bitte die zusätzliche Admin-SQL-Einrichtung ausführen.'));return}
+  await loadCommunityPolls();return;
+ }
  const deleteButton=event.target.closest('[data-poll-delete]');
  if(deleteButton){event.preventDefault();if(!isSiteAdmin){alert('Bitte zuerst als Admin anmelden.');return}const {data:{user},error:authError}=await db.auth.getUser();if(authError||!user||user.email!==ADMIN_EMAIL||user.id!=='128e1727-2a01-43ae-80db-051d49f2fc56'){isSiteAdmin=false;alert('Bitte melde dich erneut als Admin an.');renderPolls();return}const poll=communityPolls.find(p=>p.id===deleteButton.dataset.pollDelete);if(!poll)return;if(!confirm('Diese Umfrage einschließlich aller Stimmen endgültig löschen?\n\n'+poll.question))return;deleteButton.disabled=true;deleteButton.textContent='Wird gelöscht …';const {data,error}=await db.from('community_polls').delete().eq('id',poll.id).select('id');if(error||!data?.length){deleteButton.disabled=false;deleteButton.textContent='🗑 Umfrage löschen';alert('Löschen fehlgeschlagen: '+(error?.message||'Supabase hat die Aktion blockiert.'));return}await loadCommunityPolls();return}
  const button=event.target.closest('[data-poll-vote]');if(!button||button.disabled)return;const poll=communityPolls.find(p=>p.id===button.dataset.pollVote),index=Number(button.dataset.option);if(!poll||!Number.isInteger(index)||index<0||index>=poll.options.length)return;const own=poll.votes.find(v=>v.voter_id===pollVoterId);if(own&&Number(own.option_index)===index)return;button.disabled=true;
@@ -125,72 +146,49 @@ feed.addEventListener('click',async event=>{
 });
 loadPosts();
 
-// Anonymer Community-Live-Chat und Online-Anzeige (Supabase Realtime)
+// Anonymer Community-Live-Chat, Online-Anzeige und Hinweis auf ungelesene Nachrichten.
 (() => {
- const panel=document.getElementById('chatPanel');
- if(!panel)return;
- const messagesBox=document.getElementById('chatMessages');
- const form=document.getElementById('chatForm');
- const input=document.getElementById('chatInput');
- const sendButton=document.getElementById('chatSend');
- const typingBox=document.getElementById('chatTyping');
- const onlineCount=document.getElementById('onlineCount');
- const nicknameKey='sl_chat_nickname_v1';
- const clientKey='sl_chat_client_v1';
+ const panel=document.getElementById('chatPanel');if(!panel)return;
+ const messagesBox=document.getElementById('chatMessages'),form=document.getElementById('chatForm'),input=document.getElementById('chatInput'),sendButton=document.getElementById('chatSend'),typingBox=document.getElementById('chatTyping'),onlineCount=document.getElementById('onlineCount');
+ const chatNav=document.getElementById('chatNav'),badge=document.getElementById('chatUnreadBadge');
+ const nicknameKey='sl_chat_nickname_v1',clientKey='sl_chat_client_v1',unreadKey='sl_chat_unread_v1',seenKey='sl_chat_last_seen_v1';
  const makeId=()=>crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2);
- let nickname=localStorage.getItem(nicknameKey);
- if(!nickname){nickname='Member-'+Math.floor(1000+Math.random()*9000);localStorage.setItem(nicknameKey,nickname)}
- let clientId=localStorage.getItem(clientKey);
- if(!clientId){clientId=makeId();localStorage.setItem(clientKey,clientId)}
+ let nickname=localStorage.getItem(nicknameKey);if(!nickname){nickname='Member-'+Math.floor(1000+Math.random()*9000);localStorage.setItem(nicknameKey,nickname)}
+ let clientId=localStorage.getItem(clientKey);if(!clientId){clientId=makeId();localStorage.setItem(clientKey,clientId)}
  document.getElementById('chatNickname').textContent=nickname;
- let chatChannel=null,typingTimer=null,connected=false;
- const typingMembers=new Map();
- const seen=new Set();
+ let chatChannel=null,typingTimer=null,connected=false,unread=Math.max(0,Number(localStorage.getItem(unreadKey)||0));
+ const typingMembers=new Map(),seen=new Set();
+ const chatIsOpen=()=>!panel.hidden&&chatNav?.classList.contains('active')&&!document.hidden;
+ function paintBadge(){if(!badge)return;badge.textContent=unread>99?'99+':String(unread);badge.hidden=unread<1;chatNav?.setAttribute('aria-label',unread?`Chat, ${unread} ungelesene Nachrichten`:'Chat')}
+ function markRead(){unread=0;localStorage.setItem(unreadKey,'0');localStorage.setItem(seenKey,new Date().toISOString());paintBadge()}
+ paintBadge();
+ chatNav?.addEventListener('click',markRead);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&chatIsOpen())markRead()});
  function addMessage(row){
-  if(!row||seen.has(String(row.id)))return;
-  seen.add(String(row.id));
+  if(!row||seen.has(String(row.id)))return;seen.add(String(row.id));
   const empty=messagesBox.querySelector('.chat-placeholder');if(empty)empty.remove();
   const item=document.createElement('article');item.className='chat-message';
   const when=row.created_at?new Date(row.created_at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'jetzt';
   item.innerHTML='<div class="chat-message-head"><strong>'+esc(row.nickname||'Member')+'</strong><time>'+esc(when)+'</time></div><p>'+esc(row.body||'')+'</p>';
   messagesBox.appendChild(item);messagesBox.scrollTop=messagesBox.scrollHeight;
+  if(row.nickname!==nickname){if(chatIsOpen()){localStorage.setItem(seenKey,row.created_at||new Date().toISOString())}else{unread++;localStorage.setItem(unreadKey,String(unread));paintBadge()}}
  }
- function showTyping(){
-  if(!chatChannel)return;
-  chatChannel.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:true}});
-  clearTimeout(typingTimer);
-  typingTimer=setTimeout(()=>chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}}),1800);
- }
+ function showTyping(){if(!chatChannel)return;chatChannel.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:true}});clearTimeout(typingTimer);typingTimer=setTimeout(()=>chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}}),1800)}
  async function connectChat(){
+  const lastSeen=localStorage.getItem(seenKey);
   const {data,error}=await db.from('community_chat_messages').select('id,nickname,body,created_at').order('created_at',{ascending:false}).limit(80);
   if(error){messagesBox.innerHTML='<div class="chat-placeholder chat-error">Der Chat ist noch nicht eingerichtet. Bitte zuerst den SQL-Code aus der ZIP-Datei in Supabase ausführen.</div>';console.error('Chat-Nachrichten:',error);return}
-  messagesBox.innerHTML='';(data||[]).reverse().forEach(addMessage);
+  messagesBox.innerHTML='';(data||[]).reverse().forEach(addMessageInitial);
+  if(lastSeen){const missed=await db.from('community_chat_messages').select('id',{count:'exact',head:true}).gt('created_at',lastSeen).neq('nickname',nickname);if(!missed.error)unread=Math.max(unread,missed.count||0)}else{localStorage.setItem(seenKey,new Date().toISOString())}
+  localStorage.setItem(unreadKey,String(unread));paintBadge();
   chatChannel=db.channel('stimmen-loesungen-community-chat',{config:{presence:{key:clientId},broadcast:{self:false}}});
-  chatChannel
-   .on('presence',{event:'sync'},()=>{const state=chatChannel.presenceState();onlineCount.textContent=String(Object.keys(state).length)})
-   .on('broadcast',{event:'typing'},({payload})=>{
-    if(!payload||payload.client_id===clientId)return;
-    const key='sl_typing_'+payload.client_id;
-    if(payload.active){clearTimeout(typingMembers.get(key)?.timer);const timer=setTimeout(()=>{typingMembers.delete(key);typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''},2200);typingMembers.set(key,{nickname:payload.nickname||'Member',timer})}
-    else{clearTimeout(typingMembers.get(key)?.timer);typingMembers.delete(key)}
-    typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''
-   })
+  chatChannel.on('presence',{event:'sync'},()=>{const state=chatChannel.presenceState();onlineCount.textContent=String(Object.keys(state).length)})
+   .on('broadcast',{event:'typing'},({payload})=>{if(!payload||payload.client_id===clientId)return;const key='sl_typing_'+payload.client_id;if(payload.active){clearTimeout(typingMembers.get(key)?.timer);const timer=setTimeout(()=>{typingMembers.delete(key);typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''},2200);typingMembers.set(key,{nickname:payload.nickname||'Member',timer})}else{clearTimeout(typingMembers.get(key)?.timer);typingMembers.delete(key)}typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''})
    .on('postgres_changes',{event:'INSERT',schema:'public',table:'community_chat_messages'},payload=>addMessage(payload.new))
-   .subscribe(async status=>{
-    connected=status==='SUBSCRIBED';
-    if(connected){await chatChannel.track({nickname,online_at:new Date().toISOString()});document.querySelector('.chat-live').classList.add('connected')}
-    else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){document.querySelector('.chat-live').classList.remove('connected');onlineCount.textContent='0'}
-   });
+   .subscribe(async status=>{connected=status==='SUBSCRIBED';if(connected){await chatChannel.track({nickname,online_at:new Date().toISOString()});document.querySelector('.chat-live').classList.add('connected')}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){document.querySelector('.chat-live').classList.remove('connected');onlineCount.textContent='0'}});
  }
- input.addEventListener('input',showTyping);
- form.addEventListener('submit',async event=>{
-  event.preventDefault();const body=input.value.trim();if(!body||sendButton.disabled)return;
-  sendButton.disabled=true;sendButton.textContent='…';
-  const {error}=await db.from('community_chat_messages').insert({nickname,body});
-  sendButton.disabled=false;sendButton.innerHTML='Senden <span>↗</span>';
-  if(error){alert('Nachricht konnte nicht gesendet werden: '+error.message);return}
-  input.value='';chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}});
- });
- connectChat();
- window.addEventListener('beforeunload',()=>{if(chatChannel)db.removeChannel(chatChannel)});
+ function addMessageInitial(row){if(!row||seen.has(String(row.id)))return;seen.add(String(row.id));const empty=messagesBox.querySelector('.chat-placeholder');if(empty)empty.remove();const item=document.createElement('article');item.className='chat-message';const when=row.created_at?new Date(row.created_at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'jetzt';item.innerHTML='<div class="chat-message-head"><strong>'+esc(row.nickname||'Member')+'</strong><time>'+esc(when)+'</time></div><p>'+esc(row.body||'')+'</p>';messagesBox.appendChild(item);messagesBox.scrollTop=messagesBox.scrollHeight}
+  input.addEventListener('input',showTyping);
+  form.addEventListener('submit',async event=>{event.preventDefault();const body=input.value.trim();if(!body||sendButton.disabled)return;sendButton.disabled=true;sendButton.textContent='…';const {error}=await db.from('community_chat_messages').insert({nickname,body});sendButton.disabled=false;sendButton.innerHTML='Senden <span>↗</span>';if(error){alert('Nachricht konnte nicht gesendet werden: '+error.message);return}input.value='';chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}})});
+  connectChat();window.addEventListener('beforeunload',()=>{if(chatChannel)db.removeChannel(chatChannel)});
 })();

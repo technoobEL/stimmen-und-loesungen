@@ -200,3 +200,15 @@ header{background:#0a1728!important;color:#eef7ff!important;border-bottom:1px so
 @media(max-width:760px){.online-counter{padding:7px 8px;font-size:10px}.chat-panel{padding:14px;margin-top:0}.chat-top h2{font-size:22px}.chat-messages{height:55vh;min-height:300px;padding:9px}.chat-message{max-width:94%}.chat-compose button{padding:0 13px}.main-nav{flex-wrap:wrap;justify-content:flex-end}.main-nav .navbtn{display:inline-flex!important;padding:8px 9px;font-size:11px}.main-nav .pill{padding:9px 10px}}
 #forumStart.chat-mode{grid-template-columns:1fr!important}
 #forumStart.chat-mode>aside{display:none!important}
+
+
+/* Version 5: unread chat badge, cleaner navigation, and poll administration */
+.chat-nav{position:relative;overflow:visible!important}
+.chat-unread-badge{position:absolute;top:-7px;right:-6px;z-index:5;min-width:19px;height:19px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;border:2px solid #0a1728;border-radius:999px;background:#f04458;color:#fff;font:900 10px/1 Inter,system-ui,sans-serif;box-shadow:0 0 13px #f0445870;pointer-events:none}
+.chat-unread-badge[hidden]{display:none!important}
+.poll-admin-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px}
+.poll-edit,.poll-delete{padding:9px 12px;border:1px solid #3b5877;border-radius:9px;background:#1a3049;color:#c7e9ff;font-size:11px;font-weight:800;cursor:pointer}
+.poll-edit:hover{border-color:#72e8ff;color:#82edff;background:#1b3b54}
+.poll-delete{border-color:#794052;background:#3b2230;color:#ffc2d0}
+.poll-delete:hover{background:#552a3a}
+@media(max-width:760px){.chat-unread-badge{top:-6px;right:-3px;min-width:17px;height:17px;font-size:9px}.poll-admin-actions>*{flex:1 1 100%;min-height:40px}}
