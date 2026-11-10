@@ -124,3 +124,73 @@ feed.addEventListener('click',async event=>{
  const updated=feed.querySelector('[data-post-like="'+CSS.escape(String(id))+'"]');if(updated&&p.liked){updated.classList.remove('liked');void updated.offsetWidth;updated.classList.add('liked')}
 });
 loadPosts();
+
+// Anonymer Community-Live-Chat und Online-Anzeige (Supabase Realtime)
+(() => {
+ const panel=document.getElementById('chatPanel');
+ if(!panel)return;
+ const messagesBox=document.getElementById('chatMessages');
+ const form=document.getElementById('chatForm');
+ const input=document.getElementById('chatInput');
+ const sendButton=document.getElementById('chatSend');
+ const typingBox=document.getElementById('chatTyping');
+ const onlineCount=document.getElementById('onlineCount');
+ const nicknameKey='sl_chat_nickname_v1';
+ const clientKey='sl_chat_client_v1';
+ const makeId=()=>crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2);
+ let nickname=localStorage.getItem(nicknameKey);
+ if(!nickname){nickname='Member-'+Math.floor(1000+Math.random()*9000);localStorage.setItem(nicknameKey,nickname)}
+ let clientId=localStorage.getItem(clientKey);
+ if(!clientId){clientId=makeId();localStorage.setItem(clientKey,clientId)}
+ document.getElementById('chatNickname').textContent=nickname;
+ let chatChannel=null,typingTimer=null,connected=false;
+ const typingMembers=new Map();
+ const seen=new Set();
+ function addMessage(row){
+  if(!row||seen.has(String(row.id)))return;
+  seen.add(String(row.id));
+  const empty=messagesBox.querySelector('.chat-placeholder');if(empty)empty.remove();
+  const item=document.createElement('article');item.className='chat-message';
+  const when=row.created_at?new Date(row.created_at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'jetzt';
+  item.innerHTML='<div class="chat-message-head"><strong>'+esc(row.nickname||'Member')+'</strong><time>'+esc(when)+'</time></div><p>'+esc(row.body||'')+'</p>';
+  messagesBox.appendChild(item);messagesBox.scrollTop=messagesBox.scrollHeight;
+ }
+ function showTyping(){
+  if(!chatChannel)return;
+  chatChannel.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:true}});
+  clearTimeout(typingTimer);
+  typingTimer=setTimeout(()=>chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}}),1800);
+ }
+ async function connectChat(){
+  const {data,error}=await db.from('community_chat_messages').select('id,nickname,body,created_at').order('created_at',{ascending:false}).limit(80);
+  if(error){messagesBox.innerHTML='<div class="chat-placeholder chat-error">Der Chat ist noch nicht eingerichtet. Bitte zuerst den SQL-Code aus der ZIP-Datei in Supabase ausführen.</div>';console.error('Chat-Nachrichten:',error);return}
+  messagesBox.innerHTML='';(data||[]).reverse().forEach(addMessage);
+  chatChannel=db.channel('stimmen-loesungen-community-chat',{config:{presence:{key:clientId},broadcast:{self:false}}});
+  chatChannel
+   .on('presence',{event:'sync'},()=>{const state=chatChannel.presenceState();onlineCount.textContent=String(Object.keys(state).length)})
+   .on('broadcast',{event:'typing'},({payload})=>{
+    if(!payload||payload.client_id===clientId)return;
+    const key='sl_typing_'+payload.client_id;
+    if(payload.active){clearTimeout(typingMembers.get(key)?.timer);const timer=setTimeout(()=>{typingMembers.delete(key);typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''},2200);typingMembers.set(key,{nickname:payload.nickname||'Member',timer})}
+    else{clearTimeout(typingMembers.get(key)?.timer);typingMembers.delete(key)}
+    typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''
+   })
+   .on('postgres_changes',{event:'INSERT',schema:'public',table:'community_chat_messages'},payload=>addMessage(payload.new))
+   .subscribe(async status=>{
+    connected=status==='SUBSCRIBED';
+    if(connected){await chatChannel.track({nickname,online_at:new Date().toISOString()});document.querySelector('.chat-live').classList.add('connected')}
+    else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){document.querySelector('.chat-live').classList.remove('connected');onlineCount.textContent='0'}
+   });
+ }
+ input.addEventListener('input',showTyping);
+ form.addEventListener('submit',async event=>{
+  event.preventDefault();const body=input.value.trim();if(!body||sendButton.disabled)return;
+  sendButton.disabled=true;sendButton.textContent='…';
+  const {error}=await db.from('community_chat_messages').insert({nickname,body});
+  sendButton.disabled=false;sendButton.innerHTML='Senden <span>↗</span>';
+  if(error){alert('Nachricht konnte nicht gesendet werden: '+error.message);return}
+  input.value='';chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}});
+ });
+ connectChat();
+ window.addEventListener('beforeunload',()=>{if(chatChannel)db.removeChannel(chatChannel)});
+})();
