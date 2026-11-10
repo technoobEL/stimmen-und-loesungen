@@ -146,24 +146,36 @@ feed.addEventListener('click',async event=>{
 });
 loadPosts();
 
-// Anonymer Community-Live-Chat, Online-Anzeige und Hinweis auf ungelesene Nachrichten.
+// Anonymer Community-Live-Chat, Online-Anzeige und zuverlässiger Ungelesen-Zähler.
 (() => {
  const panel=document.getElementById('chatPanel');if(!panel)return;
  const messagesBox=document.getElementById('chatMessages'),form=document.getElementById('chatForm'),input=document.getElementById('chatInput'),sendButton=document.getElementById('chatSend'),typingBox=document.getElementById('chatTyping'),onlineCount=document.getElementById('onlineCount');
  const chatNav=document.getElementById('chatNav'),badge=document.getElementById('chatUnreadBadge');
- const nicknameKey='sl_chat_nickname_v1',clientKey='sl_chat_client_v1',unreadKey='sl_chat_unread_v1',seenKey='sl_chat_last_seen_v1';
+ const nicknameKey='sl_chat_nickname_v1',clientKey='sl_chat_client_v1',seenKey='sl_chat_last_seen_v2';
  const makeId=()=>crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2);
  let nickname=localStorage.getItem(nicknameKey);if(!nickname){nickname='Member-'+Math.floor(1000+Math.random()*9000);localStorage.setItem(nicknameKey,nickname)}
  let clientId=localStorage.getItem(clientKey);if(!clientId){clientId=makeId();localStorage.setItem(clientKey,clientId)}
  document.getElementById('chatNickname').textContent=nickname;
- let chatChannel=null,typingTimer=null,connected=false,unread=Math.max(0,Number(localStorage.getItem(unreadKey)||0));
+ let chatChannel=null,typingTimer=null,unread=0,unreadTimer=null;
  const typingMembers=new Map(),seen=new Set();
  const chatIsOpen=()=>!panel.hidden&&chatNav?.classList.contains('active')&&!document.hidden;
+ const lastSeen=()=>localStorage.getItem(seenKey);
  function paintBadge(){if(!badge)return;badge.textContent=unread>99?'99+':String(unread);badge.hidden=unread<1;chatNav?.setAttribute('aria-label',unread?`Chat, ${unread} ungelesene Nachrichten`:'Chat')}
- function markRead(){unread=0;localStorage.setItem(unreadKey,'0');localStorage.setItem(seenKey,new Date().toISOString());paintBadge()}
+ async function refreshUnread(){
+  if(chatIsOpen()){markRead();return}
+  const since=lastSeen();if(!since)return;
+  // Polling als zuverlässiger Fallback: Der Zähler funktioniert auch dann,
+  // wenn der Browser Realtime-Events verspätet oder gar nicht zustellt.
+  let q=db.from('community_chat_messages').select('id',{count:'exact',head:true}).gt('created_at',since);
+  q=q.or(`client_id.is.null,client_id.neq.${clientId}`);
+  const {count,error}=await q;
+  if(!error){unread=count||0;paintBadge()}
+ }
+ function markRead(){unread=0;localStorage.setItem(seenKey,new Date().toISOString());paintBadge()}
+ if(!lastSeen())localStorage.setItem(seenKey,new Date().toISOString());
  paintBadge();
- chatNav?.addEventListener('click',markRead);
- document.addEventListener('visibilitychange',()=>{if(!document.hidden&&chatIsOpen())markRead()});
+ chatNav?.addEventListener('click',()=>{markRead();setTimeout(refreshUnread,700)});
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(chatIsOpen())markRead();else refreshUnread()}});
  function addMessage(row){
   if(!row||seen.has(String(row.id)))return;seen.add(String(row.id));
   const empty=messagesBox.querySelector('.chat-placeholder');if(empty)empty.remove();
@@ -171,24 +183,25 @@ loadPosts();
   const when=row.created_at?new Date(row.created_at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'jetzt';
   item.innerHTML='<div class="chat-message-head"><strong>'+esc(row.nickname||'Member')+'</strong><time>'+esc(when)+'</time></div><p>'+esc(row.body||'')+'</p>';
   messagesBox.appendChild(item);messagesBox.scrollTop=messagesBox.scrollHeight;
-  if(row.nickname!==nickname){if(chatIsOpen()){localStorage.setItem(seenKey,row.created_at||new Date().toISOString())}else{unread++;localStorage.setItem(unreadKey,String(unread));paintBadge()}}
+  if(row.client_id!==clientId&&!chatIsOpen())refreshUnread();
+  else if(chatIsOpen())markRead();
  }
  function showTyping(){if(!chatChannel)return;chatChannel.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:true}});clearTimeout(typingTimer);typingTimer=setTimeout(()=>chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}}),1800)}
  async function connectChat(){
-  const lastSeen=localStorage.getItem(seenKey);
-  const {data,error}=await db.from('community_chat_messages').select('id,nickname,body,created_at').order('created_at',{ascending:false}).limit(80);
-  if(error){messagesBox.innerHTML='<div class="chat-placeholder chat-error">Der Chat ist noch nicht eingerichtet. Bitte zuerst den SQL-Code aus der ZIP-Datei in Supabase ausführen.</div>';console.error('Chat-Nachrichten:',error);return}
+  // Alte Versionen ohne client_id werden durch die mitgelieferte SQL-Ergänzung aktualisiert.
+  const {data,error}=await db.from('community_chat_messages').select('id,nickname,body,client_id,created_at').order('created_at',{ascending:false}).limit(80);
+  if(error){messagesBox.innerHTML='<div class="chat-placeholder chat-error">Chat konnte nicht geladen werden. Bitte die aktualisierte SUPABASE-CHAT-SETUP.sql ausführen. '+esc(error.message)+'</div>';console.error('Chat-Nachrichten:',error);return}
   messagesBox.innerHTML='';(data||[]).reverse().forEach(addMessageInitial);
-  if(lastSeen){const missed=await db.from('community_chat_messages').select('id',{count:'exact',head:true}).gt('created_at',lastSeen).neq('nickname',nickname);if(!missed.error)unread=Math.max(unread,missed.count||0)}else{localStorage.setItem(seenKey,new Date().toISOString())}
-  localStorage.setItem(unreadKey,String(unread));paintBadge();
+  await refreshUnread();
   chatChannel=db.channel('stimmen-loesungen-community-chat',{config:{presence:{key:clientId},broadcast:{self:false}}});
   chatChannel.on('presence',{event:'sync'},()=>{const state=chatChannel.presenceState();onlineCount.textContent=String(Object.keys(state).length)})
    .on('broadcast',{event:'typing'},({payload})=>{if(!payload||payload.client_id===clientId)return;const key='sl_typing_'+payload.client_id;if(payload.active){clearTimeout(typingMembers.get(key)?.timer);const timer=setTimeout(()=>{typingMembers.delete(key);typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''},2200);typingMembers.set(key,{nickname:payload.nickname||'Member',timer})}else{clearTimeout(typingMembers.get(key)?.timer);typingMembers.delete(key)}typingBox.textContent=typingMembers.size?[...typingMembers.values()].map(x=>x.nickname).join(', ')+' is typing…':''})
    .on('postgres_changes',{event:'INSERT',schema:'public',table:'community_chat_messages'},payload=>addMessage(payload.new))
-   .subscribe(async status=>{connected=status==='SUBSCRIBED';if(connected){await chatChannel.track({nickname,online_at:new Date().toISOString()});document.querySelector('.chat-live').classList.add('connected')}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){document.querySelector('.chat-live').classList.remove('connected');onlineCount.textContent='0'}});
+   .subscribe(async status=>{if(status==='SUBSCRIBED'){await chatChannel.track({nickname,online_at:new Date().toISOString()});document.querySelector('.chat-live').classList.add('connected')}else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){document.querySelector('.chat-live').classList.remove('connected');onlineCount.textContent='0'}});
+  clearInterval(unreadTimer);unreadTimer=setInterval(refreshUnread,4000);
  }
  function addMessageInitial(row){if(!row||seen.has(String(row.id)))return;seen.add(String(row.id));const empty=messagesBox.querySelector('.chat-placeholder');if(empty)empty.remove();const item=document.createElement('article');item.className='chat-message';const when=row.created_at?new Date(row.created_at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'jetzt';item.innerHTML='<div class="chat-message-head"><strong>'+esc(row.nickname||'Member')+'</strong><time>'+esc(when)+'</time></div><p>'+esc(row.body||'')+'</p>';messagesBox.appendChild(item);messagesBox.scrollTop=messagesBox.scrollHeight}
-  input.addEventListener('input',showTyping);
-  form.addEventListener('submit',async event=>{event.preventDefault();const body=input.value.trim();if(!body||sendButton.disabled)return;sendButton.disabled=true;sendButton.textContent='…';const {error}=await db.from('community_chat_messages').insert({nickname,body});sendButton.disabled=false;sendButton.innerHTML='Senden <span>↗</span>';if(error){alert('Nachricht konnte nicht gesendet werden: '+error.message);return}input.value='';chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}})});
-  connectChat();window.addEventListener('beforeunload',()=>{if(chatChannel)db.removeChannel(chatChannel)});
+ input.addEventListener('input',showTyping);
+ form.addEventListener('submit',async event=>{event.preventDefault();const body=input.value.trim();if(!body||sendButton.disabled)return;sendButton.disabled=true;sendButton.textContent='…';const {error}=await db.from('community_chat_messages').insert({nickname,body,client_id:clientId});sendButton.disabled=false;sendButton.innerHTML='Senden <span>↗</span>';if(error){alert('Nachricht konnte nicht gesendet werden: '+error.message);return}input.value='';chatChannel?.send({type:'broadcast',event:'typing',payload:{nickname,client_id:clientId,active:false}})});
+  connectChat();window.addEventListener('beforeunload',()=>{clearInterval(unreadTimer);if(chatChannel)db.removeChannel(chatChannel)});
 })();
